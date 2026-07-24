@@ -11,7 +11,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as html_comp
 
-from utils.charts_v2 import FORMATO_SHORT
+from utils.charts_v2 import FORMATO_LABEL, FORMATO_SHORT
 from utils.data_loader_v2 import (
     FORMATOS_ORDEN,
     FORMATO_CLR,
@@ -63,15 +63,30 @@ def _p_esc(s):
     return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def _pct_cell_html(pct_raw) -> str:
+    """Barra de % normal, o pastilla 'No aplica' cuando el formato no
+    corresponde a este programa (pct_fmt_X = NaN en vez de 0)."""
+    if pct_raw is None or pd.isna(pct_raw):
+        return f'<span style="font-size:10px;color:{TEXT_MUTED};font-style:italic">No aplica</span>'
+    return p_bar_html(float(pct_raw))
+
+
 _STANDARD_STATUS_VALS = {
     "finalizado", "finalizado / aprobado", "si", "sí", "en proceso", "sin iniciar", "no aplica",
     "devuelto", "devuelta", "no", "informativo", "—", "", "nan", "none",
 }
 
 
-def _vact_act_icon(cl: str, val=None) -> str:
+def _vact_act_icon(cl: str, val=None, is_checkbox: bool = False) -> str:
     lbl = STATUS_LABEL.get(cl, cl)
     val_s = str(val).strip() if val is not None else ""
+
+    # Los campos checkbox (True/False en el Excel) siempre se muestran como
+    # icono — el texto real (Aprobado/Elaborado/Pendiente/...) va de tooltip,
+    # en vez de imprimirse como texto en la celda.
+    if is_checkbox:
+        icon = status_icon_html(cl, size=16, title=val_s or lbl)
+        return icon if icon else f'<span style="color:{TEXT_LIGHT}">—</span>'
 
     if val_s and val_s.lower() not in _STANDARD_STATUS_VALS and val_s != "—":
         return (
@@ -79,8 +94,6 @@ def _vact_act_icon(cl: str, val=None) -> str:
             f'max-width:130px;line-height:1.3;word-break:break-word;text-align:left;'
             f'white-space:normal" title="{_p_esc(val_s)}">{_p_esc(val_s[:60])}</span>'
         )
-    if cl == "na":
-        return f'<span style="color:{TEXT_NA};font-size:13px;font-weight:600" title="{_p_esc(lbl)}">N/A</span>'
     icon = status_icon_html(cl, size=16, title=lbl)
     return icon if icon else f'<span style="color:{TEXT_LIGHT}">—</span>'
 
@@ -89,10 +102,7 @@ def _status_legend_html() -> str:
     parts = []
     for cl in ("done", "inprog", "nostart", "devuelto", "na"):
         lbl = STATUS_LABEL.get(cl, cl)
-        if cl == "na":
-            icon = f'<span style="color:{TEXT_NA};font-weight:600">N/A</span>'
-        else:
-            icon = status_icon_html(cl, size=14, title=lbl)
+        icon = status_icon_html(cl, size=14, title=lbl)
         parts.append(f'<span style="margin-right:16px;font-size:11px;color:{TEXT_MUTED}">{icon} {lbl}</span>')
     return (
         '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px;padding:8px 4px">'
@@ -251,7 +261,7 @@ def master_activities_table_html(df: pd.DataFrame) -> str:
         )
         for m in meta:
             h2.append(f'<th class="col-act-{slug}" {th_act} title="{_p_esc(m["name"])}">{_p_esc(m["name"])}</th>')
-        h2.append(f'<th class="col-pct-{slug}" {th_pct_etapa} title="{_p_esc(formato)}">{_p_esc(pct_lbl)}</th>')
+        h2.append(f'<th class="col-pct-{slug}" {th_pct_etapa} title="{_p_esc(FORMATO_LABEL.get(formato, formato))}">{_p_esc(pct_lbl)}</th>')
 
     h1.append(f'<th rowspan="2" {TH_GEN} title="Avance General de Reforma">% Av.<br>General<br>Reforma</th>')
 
@@ -303,7 +313,7 @@ def master_activities_table_html(df: pd.DataFrame) -> str:
         for blk in formato_blocks:
             slug = blk["slug"]
             t = blk["tints"]
-            pct = float(row.get(blk["pct_col"], 0) or 0)
+            pct_raw = row.get(blk["pct_col"])
             act_bg = t["cell_act_alt"] if row_idx % 2 == 0 else t["cell_act"]
             for m in blk["meta"]:
                 cl = row.get(f"cl_act_{m['idx']}", "na")
@@ -311,12 +321,12 @@ def master_activities_table_html(df: pd.DataFrame) -> str:
                 cells.append(
                     f'<td class="col-act-{slug}" style="display:none;padding:4px 3px;text-align:center;'
                     f'vertical-align:middle;border-bottom:1px solid {BORDER_ROW};background:{act_bg}">'
-                    f'{_vact_act_icon(cl, val)}</td>'
+                    f'{_vact_act_icon(cl, val, m.get("is_checkbox", False))}</td>'
                 )
             cells.append(
                 f'<td class="col-pct-{slug}" style="padding:4px 3px;text-align:center;'
                 f'vertical-align:middle;border-bottom:1px solid {BORDER_ROW};background:{rbg}">'
-                f'{p_bar_html(pct)}</td>'
+                f'{_pct_cell_html(pct_raw)}</td>'
             )
         gen_pct = float(row.get("avance_general_vact", 0) or 0)
         cells.append(
@@ -560,14 +570,17 @@ def excel_export_bytes(df: pd.DataFrame) -> bytes:
                 cell.fill = _hex_fill(fill6)
                 cell.font = Font(bold=True, color=font6, size=9)
             elif spec["kind"] in ("pct", "gen"):
-                try:
-                    pct = round(float(row.get(spec["field"], 0) or 0), 1)
-                except (TypeError, ValueError):
-                    pct = 0.0
-                cell.value = f"{pct:.0f}%"
-                fill6, font6 = _pct_excel_style(pct)
-                cell.fill = _hex_fill(fill6)
-                cell.font = Font(bold=True, color=font6, size=10)
+                raw = row.get(spec["field"])
+                if raw is None or pd.isna(raw):
+                    cell.value = "No aplica"
+                    cell.font = Font(italic=True, color="9AABB5", size=9)
+                    cell.fill = _hex_fill(BG_ROW)
+                else:
+                    pct = round(float(raw), 1)
+                    cell.value = f"{pct:.0f}%"
+                    fill6, font6 = _pct_excel_style(pct)
+                    cell.fill = _hex_fill(fill6)
+                    cell.font = Font(bold=True, color=font6, size=10)
 
     for ci in range(1, len(specs) + 1):
         letter = get_column_letter(ci)

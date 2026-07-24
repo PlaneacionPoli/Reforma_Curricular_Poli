@@ -13,13 +13,6 @@ from utils.poli_theme import BG_ROW, BG_ROW_ALT, BORDER_ROW, TEXT_MUTED, TEXT_PR
 from utils.vact_master_table import _p_esc, _status_legend_html, _vact_act_icon
 
 
-def _act_sort_key(act: dict) -> tuple:
-    pct = act.get("pct")
-    if isinstance(pct, (int, float)):
-        return (-float(pct), act.get("nombre", ""))
-    return (0, act.get("nombre", ""))
-
-
 def _pct_display(act: dict) -> tuple[float | None, str]:
     pct = act.get("pct")
     if isinstance(pct, (int, float)):
@@ -88,8 +81,8 @@ def render_program_actividades_detalle(data: dict) -> None:
     )
     for formato in FORMATOS_ORDEN:
         f_data = etapas_data.get(formato, {})
+        # Se conserva el orden original de las columnas del Excel.
         acts = list(f_data.get("actividades", []))
-        acts.sort(key=_act_sort_key)
         pct_f = float(f_data.get("pct", 0) or 0)
         short = FORMATO_SHORT.get(formato, formato)
         clr = FORMATO_CLR.get(formato, "#6e7681")

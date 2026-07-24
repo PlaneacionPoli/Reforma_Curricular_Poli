@@ -70,7 +70,7 @@ STATUS_CLR = {
     "nostart": "#EC0677",
     "devuelto": "#F47B20",
     "info": "#FBAF17",
-    "na": "#9aabb5",
+    "na": "#78829e",
 }
 
 # ── Nivel de formación (detalle) ──────────────────────────────────────────────
@@ -223,6 +223,12 @@ def status_icon_html(cl: str, size: int = 16, title: str = "") -> str:
             f'stroke-linecap="round"/>'
             f'<line x1="6.5" y1="9.5" x2="8.2" y2="9.5" stroke="{c}" stroke-width="1.2" '
             f'stroke-linecap="round"/>'
+        ),
+        "na": (
+            # Círculo punteado — distinto de "nostart" (círculo sólido + línea):
+            # comunica "no se evalúa / no aplica", no "pendiente de iniciar".
+            f'<circle cx="8" cy="8" r="6.5" fill="none" stroke="{c}" stroke-width="1.4" '
+            f'stroke-dasharray="2 2.1" stroke-opacity="0.9"/>'
         ),
     }
     inner = paths.get(cl)

@@ -79,8 +79,6 @@ def _vact_act_icon(cl: str, val=None) -> str:
             f'max-width:130px;line-height:1.3;word-break:break-word;text-align:left;'
             f'white-space:normal" title="{_p_esc(val_s)}">{_p_esc(val_s[:60])}</span>'
         )
-    if cl == "na":
-        return f'<span style="color:{TEXT_NA};font-size:13px;font-weight:600" title="{_p_esc(lbl)}">N/A</span>'
     icon = status_icon_html(cl, size=16, title=lbl)
     return icon if icon else f'<span style="color:{TEXT_LIGHT}">—</span>'
 
@@ -89,10 +87,7 @@ def _status_legend_html() -> str:
     parts = []
     for cl in ("done", "inprog", "nostart", "devuelto", "info", "na"):
         lbl = STATUS_LABEL.get(cl, cl)
-        if cl == "na":
-            icon = f'<span style="color:{TEXT_NA};font-weight:600">N/A</span>'
-        else:
-            icon = status_icon_html(cl, size=14, title=lbl)
+        icon = status_icon_html(cl, size=14, title=lbl)
         parts.append(
             f'<span style="margin-right:16px;font-size:11px;color:{TEXT_MUTED}">{icon} {lbl}</span>'
         )

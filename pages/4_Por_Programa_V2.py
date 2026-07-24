@@ -55,24 +55,37 @@ def _mini_kpi(label: str, val, color: str) -> str:
     )
 
 
+def _n(v) -> float | None:
+    """Convierte a float, devolviendo None si el valor es NaN/vacío — evita
+    que 'No aplica' (NaN) se muestre como 0 o rompa int()/float() (NaN es
+    'truthy', así que `v or 0` no protege contra NaN)."""
+    if v is None:
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return None if pd.isna(f) else f
+
+
 def _render_produccion_ficha(programa: str, df_scope: pd.DataFrame) -> None:
     """Bloques de Producción de Contenidos y Aulas Master para el programa seleccionado."""
     data = get_etapas_by_programa(df_scope, programa)
     prod = data.get("produccion") or {}
     aulas = data.get("aulas_master") or {}
 
-    prod_total = prod.get("total_modulos")
-    prod_proceso = prod.get("modulos_proceso")
-    prod_pct = prod.get("pct_avance")
+    prod_total = _n(prod.get("total_modulos"))
+    prod_proceso = _n(prod.get("modulos_proceso"))
+    prod_pct = _n(prod.get("pct_avance"))
     prod_fecha = prod.get("fecha_entrega", "—")
 
-    aulas_conf = aulas.get("modulos_conformidad")
-    aulas_crear = aulas.get("modulos_a_crear")
-    aulas_creadas = aulas.get("total_creadas")
-    aulas_pct = aulas.get("pct_avance")
+    aulas_conf = _n(aulas.get("modulos_conformidad"))
+    aulas_crear = _n(aulas.get("modulos_a_crear"))
+    aulas_creadas = _n(aulas.get("total_creadas"))
+    aulas_pct = _n(aulas.get("pct_avance"))
 
-    has_prod = any(v not in (None, 0, "—") for v in (prod_total, prod_proceso, prod_pct))
-    has_aulas = any(v not in (None, 0, "—") for v in (aulas_conf, aulas_crear, aulas_creadas, aulas_pct))
+    has_prod = any(v not in (None, 0) for v in (prod_total, prod_proceso, prod_pct))
+    has_aulas = any(v not in (None, 0) for v in (aulas_conf, aulas_crear, aulas_creadas, aulas_pct))
     if not has_prod and not has_aulas:
         return
 
@@ -85,9 +98,9 @@ def _render_produccion_ficha(programa: str, df_scope: pd.DataFrame) -> None:
         )
         cols = st.columns(4)
         items = [
-            ("Módulos a producir", int(prod_total or 0), "#0F385A"),
-            ("En proceso", int(prod_proceso or 0), "#1FB2DE"),
-            ("% Avance Producción", f"{float(prod_pct or 0):.0f}%", color_for_pct(float(prod_pct or 0))),
+            ("Módulos a producir", int(prod_total) if prod_total is not None else "No aplica", "#0F385A"),
+            ("En proceso", int(prod_proceso) if prod_proceso is not None else "No aplica", "#1FB2DE"),
+            ("% Avance Producción", f"{prod_pct:.0f}%" if prod_pct is not None else "No aplica", color_for_pct(prod_pct) if prod_pct is not None else "#94a3b8"),
             ("Fecha proyectada de entrega", prod_fecha, "#6a8a9e"),
         ]
         for col, (label, val, color) in zip(cols, items):
@@ -103,10 +116,10 @@ def _render_produccion_ficha(programa: str, df_scope: pd.DataFrame) -> None:
         )
         cols = st.columns(4)
         items = [
-            ("Módulos recibidos a conformidad", int(aulas_conf or 0), PCT_HIGH),
-            ("Módulos a crear", int(aulas_crear or 0), "#1FB2DE"),
-            ("Total Aulas Master creadas", int(aulas_creadas or 0), "#0F385A"),
-            ("% Avance Aulas Master", f"{float(aulas_pct or 0):.0f}%", color_for_pct(float(aulas_pct or 0))),
+            ("Módulos recibidos a conformidad", int(aulas_conf) if aulas_conf is not None else "No aplica", PCT_HIGH),
+            ("Módulos a crear", int(aulas_crear) if aulas_crear is not None else "No aplica", "#1FB2DE"),
+            ("Total Aulas Master creadas", int(aulas_creadas) if aulas_creadas is not None else "No aplica", "#0F385A"),
+            ("% Avance Aulas Master", f"{aulas_pct:.0f}%" if aulas_pct is not None else "No aplica", color_for_pct(aulas_pct) if aulas_pct is not None else "#94a3b8"),
         ]
         for col, (label, val, color) in zip(cols, items):
             with col:

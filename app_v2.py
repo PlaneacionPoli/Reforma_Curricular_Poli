@@ -64,6 +64,7 @@ from utils.poli_theme import (
     phosphor_icon,
     phosphor_icon_kpi,
     phosphor_icon_nav,
+    rgba_hex,
     PHOSPHOR_ICONS,
 )
 
@@ -127,14 +128,29 @@ def _arc(pct, color, r=22, sz=56):
     )
 
 
-def _kpi_card(label, val, sub, color, pct_bar=None):
-    pct_val = min(pct_bar * 100, 100) if pct_bar is not None else 0
+def _kpi_icon_badge(icon_name, color, sz=56):
+    """Insignia con icono (sin anillo de %) para KPIs que muestran un conteo,
+    no un porcentaje — un anillo de avance ahí no representa nada real."""
+    bg = rgba_hex(color, 0.14)
+    return (
+        f'<div style="width:{sz}px;height:{sz}px;border-radius:50%;background:{bg};'
+        f'display:flex;align-items:center;justify-content:center;flex-shrink:0">'
+        f'{phosphor_icon(icon_name, size=24, color=color)}'
+        f'</div>'
+    )
+
+
+def _kpi_card(label, val, sub, color, pct_bar=None, icon=None):
+    if pct_bar is None:
+        ring = _kpi_icon_badge(icon or "circle", color)
+    else:
+        ring = _arc(min(pct_bar * 100, 100), color)
     return (
         f'<div style="background:#FFFFFF;border:1px solid rgba(15,56,90,0.10);'
         f'border-left:4px solid {color};border-radius:12px;'
         f'padding:14px 16px;display:flex;align-items:center;gap:12px;min-height:84px;'
         f'box-shadow:0 2px 8px rgba(15,56,90,0.07)">'
-        f'<div style="flex-shrink:0">{_arc(pct_val, color)}</div>'
+        f'<div style="flex-shrink:0">{ring}</div>'
         f'<div style="flex:1;min-width:0">'
         f'<div style="font-size:10px;color:#6a8a9e;text-transform:uppercase;'
         f'letter-spacing:.5px;margin-bottom:3px">{label}</div>'
@@ -155,22 +171,66 @@ def _render_kpis(df: pd.DataFrame):
     pct_hibrido = round(hibrido / n * 100, 1) if n > 0 else 0
 
     kpis = [
-        ("Total Programas", str(n), "Programas activos", "#0F385A", 1),
-        ("Avance Promedio", f"{avg_general}%", "Avance general", color_for_pct(avg_general), avg_general / 100),
-        ("Presencial", f"{pct_presencial}%", f"{presencial} programas", "#2980B9", pct_presencial / 100),
-        ("Virtual", f"{pct_virtual}%", f"{virtual} programas", "#1FB2DE", pct_virtual / 100),
-        ("Híbrido", f"{pct_hibrido}%", f"{hibrido} programas", "#FBAF17", pct_hibrido / 100),
+        ("Total Programas", str(n), "Programas activos", "#0F385A", None, "books"),
+        ("Avance Promedio", f"{avg_general}%", "Avance general", color_for_pct(avg_general), avg_general / 100, None),
+        ("Presencial", f"{pct_presencial}%", f"{presencial} programas", "#2980B9", pct_presencial / 100, None),
+        ("Virtual", f"{pct_virtual}%", f"{virtual} programas", "#1FB2DE", pct_virtual / 100, None),
+        ("Híbrido", f"{pct_hibrido}%", f"{hibrido} programas", "#FBAF17", pct_hibrido / 100, None),
     ]
 
     cols = st.columns(5)
-    for i, (label, val, sub, color, pct_bar) in enumerate(kpis):
+    for i, (label, val, sub, color, pct_bar, icon) in enumerate(kpis):
         with cols[i]:
-            st.markdown(_kpi_card(label, val, sub, color, pct_bar), unsafe_allow_html=True)
+            st.markdown(_kpi_card(label, val, sub, color, pct_bar, icon), unsafe_allow_html=True)
+
+
+_PROD_ACCENT = "#1FB2DE"
+_AULAS_ACCENT = "#EC0677"
+
+
+def _produccion_card_html(
+    icon_name: str, title: str, subtitle: str, accent: str,
+    activo: float, activo_lbl: str, pendiente: float, pendiente_lbl: str,
+    total: float, pct: float, pct_sub: str,
+) -> str:
+    """Tarjeta compacta: barra de composición (activo/pendiente sobre el
+    total) + cifras + % de avance, todo correlacionado en un mismo bloque
+    visual. Pensada para ir lado a lado con otra del mismo tipo en una fila."""
+    w_activo = round(activo / total * 100, 1) if total else 0
+    w_pend = max(0.0, 100 - w_activo)
+    bar = (
+        f'<div style="height:9px;border-radius:5px;overflow:hidden;background:#eef3f8;display:flex;margin-top:8px">'
+        f'<div style="width:{w_activo}%;background:{accent}"></div>'
+        f'<div style="width:{w_pend}%;background:#d8e2ea"></div>'
+        f'</div>'
+    )
+    return (
+        f'<div style="background:#FFFFFF;border:1px solid rgba(15,56,90,0.10);border-left:4px solid {accent};'
+        f'border-radius:12px;padding:14px 16px;box-shadow:0 2px 8px rgba(15,56,90,0.07);height:100%">'
+        f'<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">'
+        f'<div style="min-width:0">'
+        f'<div style="font-size:13px;font-weight:700;color:{TEXT_PRIMARY};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
+        f'{phosphor_icon(icon_name, size=14, color=accent)} {title}</div>'
+        f'<div style="font-size:10px;color:{TEXT_MUTED};margin-top:1px">{subtitle}</div>'
+        f'</div>'
+        f'<div style="text-align:right;flex-shrink:0">'
+        f'<div style="font-size:22px;font-weight:800;color:{color_for_pct(pct)};line-height:1">{pct}%</div>'
+        f'</div></div>'
+        f'{bar}'
+        f'<div style="display:flex;justify-content:space-between;margin-top:6px;font-size:10px;color:{TEXT_SUBTLE};gap:6px">'
+        f'<span><b style="color:{accent}">{int(activo)}</b> {activo_lbl}</span>'
+        f'<span><b style="color:#8aabb0">{int(pendiente)}</b> {pendiente_lbl}</span>'
+        f'<span><b style="color:{TEXT_PRIMARY}">{int(total)}</b> total</span>'
+        f'</div>'
+        f'<div style="font-size:9px;color:{TEXT_MUTED};margin-top:5px">{pct_sub}</div>'
+        f'</div>'
+    )
 
 
 def _render_produccion_kpis(df: pd.DataFrame):
-    """Sección V2: avance de Producción de Contenidos y Aulas Master (formatos
-    Gerencia de Educación Virtual / Gerencia de Operaciones Academicas)."""
+    """Sección V2: tarjetas de Producción de Contenidos y Aulas Master — dos
+    formatos distintos (Gerencia de Educación Virtual / Gerencia de
+    Operaciones Academicas), lado a lado en la misma fila."""
     prod = get_estadisticas_produccion(df)
     aulas = get_estadisticas_aulas_master(df)
 
@@ -180,24 +240,37 @@ def _render_produccion_kpis(df: pd.DataFrame):
         return
 
     st.markdown(
-        f'<div style="font-size:14px;font-weight:700;color:{TEXT_PRIMARY};margin:8px 0 8px">'
+        f'<div style="font-size:14px;font-weight:700;color:{TEXT_PRIMARY};margin:8px 0 4px">'
         f'{phosphor_icon("factory", size=16)} Producción de Contenidos y Aulas Master</div>'
         f'<div style="font-size:11px;color:{TEXT_MUTED};margin-bottom:8px">'
-        "Nuevo en el Control Maestro V2 — Gerencia de Educación Virtual y Gerencia de Operaciones Academicas.</div>",
+        "Nuevo en el Control Maestro V2.</div>",
         unsafe_allow_html=True,
     )
 
-    kpis = [
-        ("Módulos a producir", f"{int(prod['total_modulos'])}", "Total programado", "#0F385A", None),
-        ("Módulos en proceso", f"{int(prod['modulos_proceso'])}", "Producción activa", "#1FB2DE", None),
-        ("Avance Producción", f"{prod['pct_avance_promedio']}%", f"{prod['n_programas_con_dato']} programas con dato", color_for_pct(prod["pct_avance_promedio"]), prod["pct_avance_promedio"] / 100),
-        ("Avance Aulas Master", f"{aulas['pct_avance_promedio']}%", f"{aulas['n_programas_con_dato']} programas con dato", color_for_pct(aulas["pct_avance_promedio"]), aulas["pct_avance_promedio"] / 100),
-    ]
+    cards = []
+    if has_prod:
+        total = prod["total_modulos"]
+        proceso = prod["modulos_proceso"]
+        pendiente = max(0.0, total - proceso)
+        cards.append(_produccion_card_html(
+            "monitor-play", "Producción de Contenidos", "Gerencia de Educación Virtual", _PROD_ACCENT,
+            proceso, "en proceso", pendiente, "pendientes", total,
+            prod["pct_avance_promedio"], f"avance prom. · {prod['n_programas_con_dato']} programas",
+        ))
+    if has_aulas:
+        creadas = aulas["total_creadas"]
+        a_crear = aulas["modulos_a_crear"]
+        total_aulas = creadas + a_crear
+        cards.append(_produccion_card_html(
+            "chalkboard-teacher", "Aulas Master", "Gerencia de Operaciones Academicas", _AULAS_ACCENT,
+            creadas, "creadas", a_crear, "por crear", total_aulas,
+            aulas["pct_avance_promedio"], f"avance prom. · {aulas['n_programas_con_dato']} programas",
+        ))
 
-    cols = st.columns(4)
-    for i, (label, val, sub, color, pct_bar) in enumerate(kpis):
-        with cols[i]:
-            st.markdown(_kpi_card(label, val, sub, color, pct_bar), unsafe_allow_html=True)
+    cols = st.columns(len(cards))
+    for col, card_html in zip(cols, cards):
+        with col:
+            st.markdown(card_html, unsafe_allow_html=True)
 
 
 def _render_chart_facultad(df: pd.DataFrame):

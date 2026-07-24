@@ -176,6 +176,9 @@ FORMATO_CLR = {
 
 FORMATO_PCT_COL = {f: f"pct_fmt_{i}" for i, f in enumerate(FORMATOS_ORDEN)}
 FORMATO_SLUG = {f: f"fmt{i}" for i, f in enumerate(FORMATOS_ORDEN)}
+# Numeración de orden (1-based), para mostrar el mismo número consistentemente
+# en todas las vistas (gráficos, tabla maestra, ficha de programa, export).
+FORMATO_NUM = {f: i + 1 for i, f in enumerate(FORMATOS_ORDEN)}
 
 # Texto crudo de la fila 9 (normalizado) -> nombre canónico del formato
 _FORMATO_CANON: dict[str, str] = {
@@ -222,10 +225,17 @@ _EXCLUDE_KEYWORDS = (
     "% de parametrización de convenios",
 )
 
-_DONE_VALUES = {"finalizado", "aprobado", "publicado", "si", "sí", "true"}
-_DEVUELTO_VALUES = {"devuelto", "devuelta"}
-_INPROG_VALUES = {"en proceso", "en ajustes"}
-_NOSTART_VALUES = {"sin iniciar", "sin publicar", "pendiente", "no", "false"}
+#  "si"/"sí"/"no" quedan fuera a propósito: como palabras de 2 letras
+#  coinciden por substring con "Sin iniciar"/"Sin publicar" (falso positivo).
+#  No aparecen como valor real en ningún campo selector del Excel V2 (los
+#  checkboxes usan True/False, ya cubiertos abajo).
+_DONE_KEYWORDS = (
+    "finalizado", "aprobado", "publicado", "true",
+    "elaborado", "revisado", "gestionado", "diligenciado", "actualizado",
+)
+_DEVUELTO_KEYWORDS = ("devuelto", "devuelta")
+_INPROG_KEYWORDS = ("en proceso", "en ajustes")
+_NOSTART_KEYWORDS = ("sin iniciar", "sin publicar", "pendiente", "false")
 _NA_VALUES = {"no aplica", "", "none", "nan", "—"}
 
 
@@ -234,23 +244,26 @@ def _norm(s) -> str:
 
 
 def _cls_formato_option(v) -> float | None:
-    """Puntaje 0-100 de un campo 'selector' (checkbox True/False o estado)."""
+    """Puntaje 0-100 de un campo 'selector' (checkbox True/False o estado).
+    Usa coincidencia por palabra clave (no exacta): un texto descriptivo como
+    'Elaborado por la escuela' cuenta igual que 'Elaborado', porque contiene
+    el verbo que indica que el paso se completó."""
     s = _norm(v)
     if not s or s in _NA_VALUES:
         return None
-    if s in _DONE_VALUES:
-        return 100.0
-    if s in _DEVUELTO_VALUES:
+    if any(k in s for k in _DEVUELTO_KEYWORDS):
         return 25.0
-    if s in _INPROG_VALUES:
+    if any(k in s for k in _DONE_KEYWORDS):
+        return 100.0
+    if any(k in s for k in _INPROG_KEYWORDS):
         return 50.0
-    if s in _NOSTART_VALUES:
+    if any(k in s for k in _NOSTART_KEYWORDS):
         return 0.0
     return None  # valor no reconocido -> se excluye del promedio
 
 
 def _score_to_class(score: float | None) -> str:
-    if score is None:
+    if score is None or (isinstance(score, float) and pd.isna(score)):
         return "na"
     if score >= 100:
         return "done"
@@ -259,6 +272,22 @@ def _score_to_class(score: float | None) -> str:
     if score >= 25:
         return "devuelto"
     return "nostart"
+
+
+def _checkbox_true_label(field_name: str) -> str:
+    """Los campos checkbox (True/False) representan un único paso de
+    aprobación — su valor real solo puede ser 'Pendiente' (False) o el verbo
+    de la acción que ya se completó (True): Elaborado, Revisado, Gestionado,
+    Diligenciado o, por defecto, Aprobado. Nunca 'Finalizado'/'Sin iniciar',
+    que son estados propios de los campos de texto (no de checkboxes)."""
+    n = _norm(field_name)
+    if "elaborad" in n or "diligenciad" in n:
+        return "Elaborado"
+    if "revisad" in n:
+        return "Revisado"
+    if "gestionad" in n:
+        return "Gestionado"
+    return "Aprobado"
 
 
 def _cls_pct_value(v) -> float | None:
@@ -345,6 +374,31 @@ def _build_group_by_col(raw: pd.DataFrame) -> dict[int, str | None]:
     return group_by_col
 
 
+
+# Siglas institucionales que deben permanecer en mayúsculas al convertir los
+# nombres de campo a tipo oración (MEN, PDF, GEV, ...).
+_ACRONYMS = {"men", "ra", "pdf", "gev", "canvas", "snies", "men."}
+
+
+def _to_sentence_case(text: str) -> str:
+    """Tipo oración: solo la primera letra en mayúscula; las siglas conocidas
+    (MEN, PDF, GEV, ...) se conservan en mayúsculas."""
+    s = re.sub(r"\s+", " ", str(text).strip())
+    if not s:
+        return s
+    words = s.split(" ")
+    out: list[str] = []
+    for i, w in enumerate(words):
+        core = re.sub(r"[^0-9A-Za-zÀ-ÿ]", "", w).lower()
+        if core and core in _ACRONYMS:
+            out.append(w.upper())
+        elif i == 0:
+            out.append(w[0].upper() + w[1:].lower())
+        else:
+            out.append(w.lower())
+    return " ".join(out)
+
+
 def _build_field_map(raw: pd.DataFrame) -> list[dict]:
     """Retorna lista de campos por columna: {col_idx, formato, name, role}."""
     group_by_col = _build_group_by_col(raw)
@@ -358,22 +412,13 @@ def _build_field_map(raw: pd.DataFrame) -> list[dict]:
         hv = header_row.iloc[j]
         if pd.isna(hv) or not str(hv).strip():
             continue
-        hname = str(hv).strip()
-        role = _field_role(formato, _norm(hname))
+        hname_raw = str(hv).strip()
+        role = _field_role(formato, _norm(hname_raw))
+        hname = _to_sentence_case(hname_raw)
         fields.append({"col_idx": j, "formato": formato, "name": hname, "role": role})
     return fields
 
 
-def _build_activities_meta_list(fields: list[dict]) -> list[dict]:
-    """Metadatos de campos 'selector' (role == score), para tablas de detalle."""
-    built: list[dict] = []
-    act_idx = 0
-    for f in fields:
-        if f["role"] != "score":
-            continue
-        built.append({"idx": act_idx, "phase": f["formato"], "name": f["name"], "responsable": "—"})
-        act_idx += 1
-    return built
 
 
 def _build_etapas_df() -> pd.DataFrame:
@@ -481,40 +526,55 @@ def _build_etapas_df() -> pd.DataFrame:
         score_series = series.apply(_cls_formato_option)
         formato_scores.setdefault(formato, []).append(score_series)
 
+        # Checkbox real (celda True/False en el Excel) vs. campo de texto con
+        # estados — se usa para decidir si la tabla muestra icono o texto.
+        is_checkbox = bool(series.str.lower().isin(["true", "false", ""]).all())
+
         cl_col = f"cl_act_{act_idx}"
         val_col = f"val_act_{act_idx}"
         df[cl_col] = score_series.apply(_score_to_class).values
+        true_lbl = _checkbox_true_label(field["name"])
         df[val_col] = series.apply(
-            lambda v: ("Sí" if _norm(v) == "true" else "No" if _norm(v) == "false" else (
-                str(v).strip() if str(v).strip() not in ("", "None", "nan") else "—"
-            ))
+            lambda v: (
+                true_lbl if _norm(v) == "true"
+                else "Pendiente" if _norm(v) == "false"
+                else (str(v).strip() if str(v).strip() not in ("", "None", "nan") else "—")
+            )
         ).values
         df[f"act_phase_{act_idx}"] = formato
         df[f"act_name_{act_idx}"] = field["name"]
         df[f"act_owner_{act_idx}"] = "—"
+        df[f"act_is_checkbox_{act_idx}"] = is_checkbox
         act_idx += 1
 
     df["_n_activities"] = act_idx
 
     # ── % de avance por formato ──────────────────────────────────────────
+    # OJO: se deja NaN (no 0) cuando el formato no aplica para ese programa
+    # (Excel = "No aplica", o todos sus campos selector son "No aplica").
+    # Forzar a 0 penalizaría el avance general de programas donde ese
+    # formato genuinamente no corresponde (ej. Producción de Contenidos en
+    # un programa Presencial).
     for formato in FORMATOS_ORDEN:
         pct_key = FORMATO_PCT_COL[formato]
         if formato in formato_override:
-            df[pct_key] = formato_override[formato].fillna(0).astype(float).values
+            df[pct_key] = formato_override[formato].astype(float).values
             continue
         scores = formato_scores.get(formato) or []
         if scores:
             mat = pd.concat(scores, axis=1)
-            calc = mat.mean(axis=1, skipna=True).round(1)
-            df[pct_key] = calc.fillna(0).values
+            df[pct_key] = mat.mean(axis=1, skipna=True).round(1).values
         else:
-            df[pct_key] = 0.0
+            df[pct_key] = np.nan
 
-    # ── Avance general: promedio simple de los % de los 11 formatos ────────
+    # ── Avance general: promedio simple de los % de los formatos que sí
+    # aplican para cada programa (los "No aplica" —NaN— se excluyen, no
+    # cuentan como 0). Si por alguna razón NINGÚN formato aplica, se deja 0.
     pct_cols = [FORMATO_PCT_COL[f] for f in FORMATOS_ORDEN]
-    df["avance_general_vact"] = df[pct_cols].mean(axis=1).round(1)
+    df["avance_general_vact"] = df[pct_cols].mean(axis=1, skipna=True).round(1).fillna(0)
 
-    _ACTIVITIES_META = _build_activities_meta_list(fields)
+    _ACTIVITIES_META = []
+    _ensure_activities_meta(df)
     return df
 
 
@@ -535,6 +595,7 @@ def _ensure_activities_meta(df: pd.DataFrame) -> list[dict]:
             "phase": df[f"act_phase_{i}"].iloc[0],
             "name": df[f"act_name_{i}"].iloc[0],
             "responsable": "—",
+            "is_checkbox": bool(df[f"act_is_checkbox_{i}"].iloc[0]) if f"act_is_checkbox_{i}" in df.columns else False,
         })
     _ACTIVITIES_META = meta
     return meta
@@ -597,6 +658,16 @@ def apply_filters_vact(
     return out.reset_index(drop=True)
 
 
+def _pct_or_none(v) -> float | None:
+    """None cuando el formato no aplica para el programa (NaN en la
+    columna pct_fmt_X), en vez de forzarlo a 0."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return None if pd.isna(f) else f
+
+
 def get_etapas_by_programa(df: pd.DataFrame, nombre_programa: str) -> dict:
     """Actividades (campos selector) + % por formato de un programa."""
     meta = _ensure_activities_meta(df)
@@ -613,7 +684,7 @@ def get_etapas_by_programa(df: pd.DataFrame, nombre_programa: str) -> dict:
             i = m["idx"]
             cl = row.get(f"cl_act_{i}", "na")
             val = row.get(f"val_act_{i}", "—")
-            score = _cls_formato_option(val) if val not in ("Sí", "No") else (100.0 if val == "Sí" else 0.0)
+            score = _cls_formato_option(val)
             acts.append({
                 "nombre": m["name"],
                 "estado": STATUS_LABEL.get(cl, cl),
@@ -623,8 +694,10 @@ def get_etapas_by_programa(df: pd.DataFrame, nombre_programa: str) -> dict:
                 "responsable": "—",
             })
         pct_col = FORMATO_PCT_COL[formato]
+        pct_val = _pct_or_none(row.get(pct_col))
         result["etapas"][formato] = {
-            "pct": float(row.get(pct_col, 0) or 0),
+            "pct": pct_val,  # None = el formato no aplica a este programa
+            "aplica": pct_val is not None,
             "actividades": acts,
         }
     result["avance_general"] = float(row.get("avance_general_vact", 0) or 0)
@@ -686,8 +759,10 @@ def get_estadisticas_etapa(df: pd.DataFrame, formato_name: str) -> dict:
             else:
                 na += 1
 
+    pct_mean = df[pct_col].mean()  # skipna=True por defecto: excluye "No aplica"
     return {
-        "pct_promedio": round(float(df[pct_col].mean()), 1),
+        "pct_promedio": round(float(pct_mean), 1) if pd.notna(pct_mean) else 0.0,
+        "n_programas_aplica": int(df[pct_col].notna().sum()),
         "done": done, "inprog": inprog, "devuelto": devuelto,
         "nostart": nostart, "info": info, "na": na,
         "total_act": len(acts_meta) * len(df) if acts_meta else 0,
@@ -720,7 +795,8 @@ def get_detalle_etapa(df: pd.DataFrame, formato_name: str) -> dict:
             "pct_done": round(done / n_prog * 100, 1) if n_prog else 0,
             "pct_avance": pct_avance,
         })
-    actividades.sort(key=lambda a: (-a["pct_done"], a["nombre"]))
+    # Se conserva el orden original de las columnas del Excel (no se reordena
+    # por % de avance), para que coincida con el orden real del formato.
     total_cells = stats.get("total_act") or 0
     pct_por_estado = {}
     for k in ("done", "inprog", "devuelto", "nostart", "info", "na"):

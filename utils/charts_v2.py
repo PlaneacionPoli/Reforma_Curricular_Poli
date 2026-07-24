@@ -13,16 +13,18 @@ import streamlit as st
 from utils.data_loader_v2 import (
     FORMATOS_ORDEN,
     FORMATO_CLR,
+    FORMATO_NUM,
     FORMATO_PCT_COL,
     _ensure_activities_meta,
     get_detalle_etapa,
 )
 from utils.poli_theme import BRAND_PRIMARY, STATUS_CLR, TEXT_MUTED, TEXT_PRIMARY
 
-FORMATO_SHORT = {
+# Etiqueta corta por formato (sin numerar) — base para construir FORMATO_SHORT.
+_FORMATO_SHORT_BASE = {
     "Aseguramiento de la Calidad": "Aseguramiento",
     "Formato Creación de Programas Banner": "Creación Banner",
-    "Proyecciones Académicas": "Proyecciones",
+    "Proyecciones Académicas": "Proyecciones Académicas",
     "Resultados de Aprendizaje RA": "Result. Aprendizaje",
     "Actas de Homologación": "Actas Homolog.",
     "Syllabus": "Syllabus",
@@ -32,6 +34,16 @@ FORMATO_SHORT = {
     "Convenios y Homologaciones": "Convenios",
     "Dirección de Mercado": "Mercado",
 }
+
+# Etiqueta corta numerada ("1. Aseguramiento", "2. Creación Banner", ...).
+# Al numerarse aquí, el número se propaga automáticamente a todas las vistas
+# que usan FORMATO_SHORT: gráficos, tabla maestra, ficha de programa y export.
+FORMATO_SHORT = {
+    f: f"{FORMATO_NUM[f]}. {_FORMATO_SHORT_BASE.get(f, f)}" for f in FORMATOS_ORDEN
+}
+
+# Nombre completo numerado, para vistas que muestran el nombre sin abreviar.
+FORMATO_LABEL = {f: f"{FORMATO_NUM[f]}. {f}" for f in FORMATOS_ORDEN}
 
 STATUS_STACK = [
     ("done", "Finalizado / Aprobado", STATUS_CLR["done"]),
@@ -128,7 +140,6 @@ def _activity_y_labels(acts: list[dict]) -> tuple[list[str], list[str]]:
 def _fig_actividades_level(df: pd.DataFrame, formato: str) -> go.Figure:
     meta = _ensure_activities_meta(df)
     acts = [m for m in meta if m["phase"] == formato]
-    n_prog = len(df)
 
     if not acts:
         fig = go.Figure()
@@ -140,16 +151,9 @@ def _fig_actividades_level(df: pd.DataFrame, formato: str) -> go.Figure:
         )
         return fig
 
-    act_rows = []
-    for m in acts:
-        col = f"cl_act_{m['idx']}"
-        if col not in df.columns:
-            continue
-        done = int((df[col] == "done").sum())
-        act_rows.append((m, done / max(n_prog, 1)))
-
-    act_rows.sort(key=lambda x: -x[1])
-    acts_sorted = [m for m, _ in act_rows]
+    # Se conserva el orden original de las columnas del Excel (no se reordena
+    # por % de avance), para que coincida con el orden real del formato.
+    acts_sorted = [m for m in acts if f"cl_act_{m['idx']}" in df.columns]
     names_short, names_full = _activity_y_labels(acts_sorted)
 
     fig = go.Figure()
@@ -170,19 +174,20 @@ def _fig_actividades_level(df: pd.DataFrame, formato: str) -> go.Figure:
             )
         )
 
+    # El título va como caption HTML fuera de la figura (ver render_etapas_drilldown)
+    # para que nunca se superponga con la leyenda horizontal.
     fig.update_layout(
         barmode="stack",
         bargap=0.28,
-        height=max(280, len(acts_sorted) * 28 + 72),
-        margin=dict(l=4, r=24, t=40, b=8),
+        height=max(280, len(acts_sorted) * 28 + 80),
+        margin=dict(l=4, r=24, t=50, b=8),
         uniformtext=dict(minsize=8, mode="hide"),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0, font=dict(size=10)),
+        legend=dict(orientation="h", yanchor="bottom", y=1.0, x=0, font=dict(size=10)),
         yaxis=dict(autorange="reversed", tickfont=dict(size=11)),
         xaxis=dict(showgrid=True, gridcolor="rgba(15,56,90,0.06)", title="Programas"),
         font=dict(family="Segoe UI"),
-        title=dict(text=f"Campos selector — {FORMATO_SHORT.get(formato, formato)}", font=dict(size=13)),
     )
     return fig
 
@@ -352,9 +357,21 @@ def _render_ficha_formatos_gantt(data: dict) -> None:
         '<div class="f2-gantt f2-ficha-gantt">',
     ]
     for formato in FORMATOS_ORDEN:
-        pct = float(data["etapas"].get(formato, {}).get("pct", 0) or 0)
+        pct_raw = data["etapas"].get(formato, {}).get("pct")
         short = FORMATO_SHORT.get(formato, formato)
         clr = FORMATO_CLR.get(formato, "#6e7681")
+        if pct_raw is None:
+            # El formato no aplica a este programa (Excel = "No aplica").
+            rows.append(
+                f'<div class="f2-gantt-row f2-gantt-row-compact">'
+                f'<span class="f2-gantt-label">{_html_esc(short)}</span>'
+                f'<div class="f2-gantt-track" style="display:flex;align-items:center;padding-left:10px">'
+                f'<span style="font-size:11px;color:{TEXT_MUTED};font-style:italic">No aplica</span></div>'
+                f'<span class="f2-gantt-pct-out"></span>'
+                f"</div>"
+            )
+            continue
+        pct = float(pct_raw)
         w = min(max(pct, 0), 100)
         pct_lbl = f"{pct:.0f}%"
         if w >= 18:
@@ -406,6 +423,11 @@ def render_etapas_drilldown(df: pd.DataFrame, *, key_prefix: str = "formatos") -
             if st.button("Volver a formatos", key=f"{key_prefix}_back", icon=":material/arrow_back:"):
                 st.session_state[sk] = None
                 st.rerun()
+            st.markdown(
+                f'<div style="font-size:13px;font-weight:700;color:{TEXT_PRIMARY};margin:10px 0 2px">'
+                f'Campos selector — {FORMATO_SHORT.get(formato_sel, formato_sel)}</div>',
+                unsafe_allow_html=True,
+            )
             fig = _fig_actividades_level(df, formato_sel)
         else:
             fig = _fig_formatos_level(df)
