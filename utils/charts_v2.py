@@ -23,7 +23,7 @@ from utils.poli_theme import BRAND_PRIMARY, STATUS_CLR, TEXT_MUTED, TEXT_PRIMARY
 # Etiqueta corta por formato (sin numerar) — base para construir FORMATO_SHORT.
 _FORMATO_SHORT_BASE = {
     "Aseguramiento de la Calidad": "Aseguramiento",
-    "Formato Creación de Programas Banner": "Creación Banner",
+    "Formato Creación de Programas Banner": "Valid. Plan de estudios (Banner)",
     "Proyecciones Académicas": "Proyecciones Académicas",
     "Resultados de Aprendizaje RA": "Result. Aprendizaje",
     "Actas de Homologación": "Actas Homolog.",
@@ -35,15 +35,24 @@ _FORMATO_SHORT_BASE = {
     "Dirección de Mercado": "Mercado",
 }
 
-# Etiqueta corta numerada ("1. Aseguramiento", "2. Creación Banner", ...).
-# Al numerarse aquí, el número se propaga automáticamente a todas las vistas
-# que usan FORMATO_SHORT: gráficos, tabla maestra, ficha de programa y export.
+# Etiqueta corta numerada ("1. Aseguramiento", "2. Valid. Plan de estudios
+# (Banner)", ...). Al numerarse aquí, el número se propaga automáticamente a
+# todas las vistas que usan FORMATO_SHORT: gráficos, tabla maestra, ficha de
+# programa y export.
 FORMATO_SHORT = {
     f: f"{FORMATO_NUM[f]}. {_FORMATO_SHORT_BASE.get(f, f)}" for f in FORMATOS_ORDEN
 }
 
+# Nombre a mostrar sin abreviar cuando difiere del nombre canónico del Excel
+# (el canónico sigue siendo la llave de datos en data_loader_v2).
+_FORMATO_DISPLAY_BASE = {
+    "Formato Creación de Programas Banner": "Validación Plan de estudios (Banner)",
+}
+
 # Nombre completo numerado, para vistas que muestran el nombre sin abreviar.
-FORMATO_LABEL = {f: f"{FORMATO_NUM[f]}. {f}" for f in FORMATOS_ORDEN}
+FORMATO_LABEL = {
+    f: f"{FORMATO_NUM[f]}. {_FORMATO_DISPLAY_BASE.get(f, f)}" for f in FORMATOS_ORDEN
+}
 
 STATUS_STACK = [
     ("done", "Finalizado / Aprobado", STATUS_CLR["done"]),
