@@ -736,6 +736,8 @@ def get_estadisticas_etapa(df: pd.DataFrame, formato_name: str) -> dict:
         return {
             "pct_promedio": 0, "done": 0, "inprog": 0, "devuelto": 0,
             "nostart": 0, "info": 0, "na": 0, "total_act": 0, "n_programas": 0,
+            "n_programas_aplica": 0, "prog_done": 0, "prog_inprog": 0,
+            "prog_nostart": 0, "prog_na": 0,
         }
 
     meta = _ensure_activities_meta(df)
@@ -760,13 +762,24 @@ def get_estadisticas_etapa(df: pd.DataFrame, formato_name: str) -> dict:
                 na += 1
 
     pct_mean = df[pct_col].mean()  # skipna=True por defecto: excluye "No aplica"
+
+    # Distribución a nivel PROGRAMA (no de campo selector): cuántos programas
+    # tienen el formato terminado, en curso o sin arrancar. NaN = no aplica.
+    pcts = df[pct_col]
+    prog_na = int(pcts.isna().sum())
+    prog_done = int((pcts >= 100).sum())
+    prog_nostart = int((pcts <= 0).sum())
+    prog_inprog = int(len(df) - prog_na - prog_done - prog_nostart)
+
     return {
         "pct_promedio": round(float(pct_mean), 1) if pd.notna(pct_mean) else 0.0,
-        "n_programas_aplica": int(df[pct_col].notna().sum()),
+        "n_programas_aplica": int(pcts.notna().sum()),
         "done": done, "inprog": inprog, "devuelto": devuelto,
         "nostart": nostart, "info": info, "na": na,
         "total_act": len(acts_meta) * len(df) if acts_meta else 0,
         "n_programas": len(df),
+        "prog_done": prog_done, "prog_inprog": prog_inprog,
+        "prog_nostart": prog_nostart, "prog_na": prog_na,
     }
 
 
