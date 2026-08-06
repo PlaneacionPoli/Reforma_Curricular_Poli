@@ -11,8 +11,8 @@ from utils.charts_v2 import FORMATO_SHORT, render_etapas_drilldown
 from utils.data_loader_v2 import (
     FORMATOS_ORDEN,
     FORMATO_CLR,
+    FORMATO_PCT_COL,
     FAC_ABREV_INV,
-    get_estadisticas_etapa,
     load_etapas_data,
 )
 from utils.f2_components_v2 import (
@@ -48,23 +48,46 @@ _ESTADOS_PROGRAMA = [
 ]
 
 
-def _ficha_formato_html(formato: str, stats: dict, clr: str) -> str:
-    """Ficha compacta: % promedio + reparto real de programas del formato."""
-    aplica = int(stats.get("n_programas_aplica", 0))
-    n_na = int(stats.get("prog_na", 0))
+def _reparto_programas(df: pd.DataFrame, formato: str) -> dict:
+    """Reparto de programas del formato, calculado sobre el df YA filtrado.
 
+    Se recalcula en cada render (no hay valores precocinados): el % por
+    programa se lee de la columna del formato en las filas que sobrevivieron
+    a los filtros. NaN = el formato no aplica a ese programa.
+    """
+    col = FORMATO_PCT_COL.get(formato)
+    pcts = df[col] if col in df.columns else pd.Series(dtype=float)
+
+    na = int(pcts.isna().sum())
+    done = int((pcts >= 100).sum())
+    nostart = int((pcts <= 0).sum())
+    pct_medio = pcts.mean()  # excluye NaN: promedia solo donde el formato aplica
+
+    return {
+        "prog_done": done,
+        "prog_inprog": int(len(pcts) - na - done - nostart),
+        "prog_nostart": nostart,
+        "prog_na": na,
+        "aplica": int(len(pcts) - na),
+        "total": int(len(pcts)),
+        "pct_promedio": round(float(pct_medio), 1) if pd.notna(pct_medio) else 0.0,
+    }
+
+
+def _ficha_formato_html(formato: str, rep: dict, clr: str) -> str:
+    """Ficha compacta: % promedio + reparto real de programas del formato."""
     cifras = "".join(
-        f'<div title="{stats.get(k, 0)} de {aplica} programa(s) {lbl}">'
+        f'<div title="{rep[k]} de {rep["aplica"]} programa(s) {lbl}">'
         f'<div style="font-size:18px;font-weight:800;line-height:1.1;'
-        f'color:{c if stats.get(k, 0) else "#c3ced6"}">{stats.get(k, 0)}</div>'
+        f'color:{c if rep[k] else "#c3ced6"}">{rep[k]}</div>'
         f'<div style="font-size:9px;color:{TEXT_MUTED};line-height:1.2">{lbl}</div>'
         f'</div>'
         for k, lbl, c in _ESTADOS_PROGRAMA
     )
     na_txt = (
         f'<div style="font-size:9px;color:{TEXT_MUTED};margin-top:7px">'
-        f'{n_na} sin aplicar este formato</div>'
-        if n_na
+        f'{rep["prog_na"]} sin aplicar este formato</div>'
+        if rep["prog_na"]
         else ""
     )
 
@@ -74,8 +97,8 @@ def _ficha_formato_html(formato: str, stats: dict, clr: str) -> str:
         f'<div style="font-size:9px;color:#6a8a9e;text-transform:uppercase;'
         f'line-height:1.3;min-height:24px">{FORMATO_SHORT.get(formato, formato)}</div>'
         f'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px">'
-        f'<span style="font-size:22px;font-weight:800;color:{clr}">{stats["pct_promedio"]}%</span>'
-        f'<span style="font-size:10px;color:{TEXT_MUTED}">{aplica} de {stats["n_programas"]} prog.</span>'
+        f'<span style="font-size:22px;font-weight:800;color:{clr}">{rep["pct_promedio"]}%</span>'
+        f'<span style="font-size:10px;color:{TEXT_MUTED}">{rep["aplica"]} de {rep["total"]} prog.</span>'
         f'</div>'
         f'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;'
         f'border-top:1px solid rgba(15,56,90,.08);margin-top:10px;padding-top:9px">{cifras}</div>'
@@ -119,11 +142,12 @@ else:
         row_formatos = FORMATOS_ORDEN[row_start:row_start + n_cols]
         cols = st.columns(n_cols)
         for i, formato in enumerate(row_formatos):
-            stats = get_estadisticas_etapa(df, formato)
+            # Se calcula aquí, en cada render, sobre el df ya filtrado.
+            rep = _reparto_programas(df, formato)
             clr = FORMATO_CLR.get(formato, "#6e7681")
             with cols[i]:
                 st.markdown(
-                    _ficha_formato_html(formato, stats, clr),
+                    _ficha_formato_html(formato, rep, clr),
                     unsafe_allow_html=True,
                 )
 
